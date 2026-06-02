@@ -41,17 +41,15 @@ pipeline {
         // --- STAGE 2: DEV ENVIRONMENT (AUTOMATIC) ---
         stage('Deploy to Dev') {
             steps {
-                milestone(10) // ✅ Syntax fix: Steps ke andar milestone
-                withKubeConfig([credentialsId: KUBECONFIG_CREDENTIAL_ID]) {
-                    echo 'Deploying to Development Environment...'
-                    sh """
-                        kubectl set image deployment/spring-app spring-app=${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} -n dev --record
-                        kubectl rollout status deployment/spring-app -n dev
-                    """
-                }
-            }
-        }
-
+                sh """
+        kubectl --kubeconfig=/home/opstree/.kube/config \
+        --client-certificate=/var/lib/jenkins/.minikube/client.crt \
+        --client-key=/var/lib/jenkins/.minikube/client.key \
+        --certificate-authority=/var/lib/jenkins/.minikube/ca.crt \
+        set image deployment/spring-app spring-app=krishan9818/spring3hibernate:${BUILD_NUMBER} -n dev
+        """
+    }
+}
         // --- STAGE 3: STAGING ENVIRONMENT (MANUAL APPROVAL) ---
         stage('Approve Staging') {
             steps {
