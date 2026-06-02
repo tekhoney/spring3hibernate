@@ -6,7 +6,7 @@ pipeline {
     }
 
     environment {
-        REGISTRY = "your-dockerhub-username" // ⚠️ Yahan apna Docker Hub username zaroor likhein
+        REGISTRY = "krishan9818" // ⚠️ Yahan apna Docker Hub username zaroor likhein
         IMAGE_NAME = "spring3hibernate"
         IMAGE_TAG = "${BUILD_NUMBER}"
         KUBECONFIG_CREDENTIAL_ID = 'k8s-kubeconfig'
