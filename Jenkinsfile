@@ -1,6 +1,10 @@
 pipeline {
     agent any
 
+    tools {
+        maven 'maven3' 
+    }
+
     environment {
         REGISTRY = "your-dockerhub-username" // ⚠️ Yahan apna Docker Hub username zaroor likhein
         IMAGE_NAME = "spring3hibernate"
