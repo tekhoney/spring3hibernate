@@ -89,7 +89,7 @@ pipeline {
                         
                         // Hum naye pod ke andar hi curl command chalakar status code check karenge
                         // Agar status code 200 aaya toh pass, nahi toh fail
-                        def checkCommand = "kubectl ${kubeConfig} exec -n prod deployment/spring-app-${targetColor} -- curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/spring3hibernate"
+                        def checkCommand = "kubectl ${kubeConfig} exec -n prod deployment/spring-app-${targetColor} -- curl -sL -o /dev/null -w '%{http_code}' http://localhost:8080/spring3hibernate"
                         
                         def statusCode = sh(script: checkCommand, returnStdout: true).trim()
                         echo "Health Check Response Code: ${statusCode}"
