@@ -40,14 +40,9 @@ pipeline {
 
         // --- STAGE 2: DEV ENVIRONMENT (AUTOMATIC) ---
         stage('Deploy to Dev') {
-            steps {
-                sh """
-        kubectl --kubeconfig=/home/opstree/.kube/config \
-        --client-certificate=/var/lib/jenkins/.minikube/client.crt \
-        --client-key=/var/lib/jenkins/.minikube/client.key \
-        --certificate-authority=/var/lib/jenkins/.minikube/ca.crt \
-        set image deployment/spring-app spring-app=krishan9818/spring3hibernate:${BUILD_NUMBER} -n dev
-        """
+    steps {
+        // Ab direct jenkins ke paas padi config file use hogi
+        sh "kubectl --kubeconfig=/var/lib/jenkins/.kube/config set image deployment/spring-app spring-app=krishan9818/spring3hibernate:${BUILD_NUMBER} -n dev"
     }
 }
         // --- STAGE 3: STAGING ENVIRONMENT (MANUAL APPROVAL) ---
