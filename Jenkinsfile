@@ -1,15 +1,11 @@
 pipeline {
     agent any
 
-    tools {
-        maven 'maven3' 
-    }
-
     environment {
-        REGISTRY = "krishan9818" // ⚠️ Yahan apna Docker Hub username zaroor likhein
-        IMAGE_NAME = "spring3hibernate"
+        REGISTRY = 'krishan9818'
+        IMAGE_NAME = 'spring3hibernate'
         IMAGE_TAG = "${BUILD_NUMBER}"
-        KUBECONFIG_CREDENTIAL_ID = 'k8s-kubeconfig'
+        kubeConfig = '--kubeconfig=/var/lib/jenkins/.kube/config'
     }
 
     options {
@@ -18,7 +14,7 @@ pipeline {
     }
 
     stages {
-        // --- STAGE 1: BUILD & PUSH ---
+        // --- STAGE 1: BUILD & PACKAGE ---
         stage('Build & Package') {
             steps {
                 echo 'Building Application using Maven...'
@@ -26,39 +22,38 @@ pipeline {
             }
         }
 
+        // --- STAGE 2: DOCKER BUILD & PUSH ---
         stage('Docker Build & Push') {
             steps {
                 script {
-                    docker.withRegistry('', 'docker-hub-creds') {
-                        def customImage = docker.build("${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}")
-                        customImage.push()
-                        customImage.push("latest")
+                    docker.withRegistry('https://index.docker.io/v1/', 'dockerhub-credentials') {
+                        echo 'Building Docker Image...'
+                        sh "docker build -t ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ."
+                        
+                        echo 'Pushing Docker Image to Registry...'
+                        sh "docker push ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
                     }
                 }
             }
         }
 
-        // --- STAGE 2: DEV ENVIRONMENT (AUTOMATIC) ---
+        // --- STAGE 3: DEPLOY TO DEV ---
         stage('Deploy to Dev') {
-    steps {
-        // Ab direct jenkins ke paas padi config file use hogi
-        sh "kubectl --kubeconfig=/var/lib/jenkins/.kube/config set image deployment/spring-app spring-app=krishan9818/spring3hibernate:${BUILD_NUMBER} -n dev"
-    }
-}
-        // --- STAGE 3: STAGING ENVIRONMENT (MANUAL APPROVAL) ---
-        stage('Approve Staging') {
             steps {
-                input message: 'Do you want to deploy to Staging?', ok: 'Deploy'
+                echo 'Deploying to Development Environment...'
+                sh "kubectl ${kubeConfig} set image deployment/spring-app spring-app=${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} -n dev"
             }
         }
 
+        // --- STAGE 4: DEPLOY TO STAGING ---
         stage('Deploy to Staging') {
-    steps {
-        echo 'Deploying to Staging Environment...'
-        sh "kubectl --kubeconfig=/var/lib/jenkins/.kube/config set image deployment/spring-app spring-app=krishan9818/spring3hibernate:${BUILD_NUMBER} -n staging"
-    }
-}
-// --- STAGE 4: PRODUCTION ENVIRONMENT (BLUE-GREEN) ---
+            steps {
+                echo 'Deploying to Staging Environment...'
+                sh "kubectl ${kubeConfig} set image deployment/spring-app spring-app=${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} -n staging"
+            }
+        }
+
+        // --- STAGE 5: PRODUCTION ENVIRONMENT (BLUE-GREEN) ---
         stage('Approve Production') {
             steps {
                 input message: 'Approve Production Blue-Green Deployment?', ok: 'Approve'
@@ -69,51 +64,56 @@ pipeline {
             steps {
                 milestone(30) 
                 script {
-                    // Ek variable mein local config file ka path fix kar dete hain
-                    def kubeConfig = "--kubeconfig=/var/lib/jenkins/.kube/config"
-
-                    // 1. Pata karein ki abhi kaunsa color active hai (Blue ya Green) via Service selector
-                    def activeColor = sh(script: "kubectl ${kubeConfig} get svc spring-app-prod -n prod -o jsonpath='{.spec.selector.color}'", returnStdout: true).trim()
+                    // 1. Check active color
+                    def activeColor = ""
+                    try {
+                        activeColor = sh(script: "kubectl ${kubeConfig} get svc spring-app-prod -n prod -o jsonpath='{.spec.selector.color}'", returnStdout: true).trim()
+                    } catch (Exception e) {
+                        echo "Service not found or no active color yet. Starting fresh."
+                    }
+                    
                     def targetColor = (activeColor == 'blue') ? 'green' : 'blue'
                     
-                    echo "Current Active Environment: ${activeColor}"
+                    echo "Current Active Environment: ${activeColor ? activeColor : 'None'}"
                     echo "Deploying to Target Environment: ${targetColor}"
 
-                    // 2. Naye code ko target environment (idle color) par deploy karein
+                    // 2. Deploy to target color
                     sh """
-                        kubectl ${kubeConfig} set image deployment/spring-app-${targetColor} spring-app=${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} -n prod --record
+                        kubectl ${kubeConfig} set image deployment/spring-app-${targetColor} spring-app=${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} -n prod
                         kubectl ${kubeConfig} rollout status deployment/spring-app-${targetColor} -n prod
                     """
 
-                    // 3. Health Check Verification (httpRequest step)
+                    // 3. Health Check
                     def targetSvcUrl = "http://spring-app-${targetColor}.prod.svc.cluster.local:8080/spring3hibernate" 
                     echo "Running Health Check on: ${targetSvcUrl}"
                     
                     try {
-                        // HTTP request plugin ka use karke response validation
                         def response = httpRequest url: targetSvcUrl, validResponseCodes: '200'
                         echo "Health Check Passed!"
                         
-                        // 4. Traffic Switch (Agar health check pass hua toh service ko new color par switch karein)
-                        echo "Switching traffic to ${targetColor}..."
+                        // 4. Traffic Switch
+                        echo "Switching live traffic to ${targetColor}..."
                         sh "kubectl ${kubeConfig} patch svc spring-app-prod -n prod -p '{\"spec\":{\"selector\":{\"color\":\"${targetColor}\"}}}'"
+                        echo "Traffic successfully switched!"
                         
                     } catch (Exception e) {
                         echo "Health Check Failed! Triggering Automatic Rollback..."
-                        // 5. Automatic Rollback on failure
+                        // 5. Automatic Rollback
                         sh "kubectl ${kubeConfig} rollout undo deployment/spring-app-${targetColor} -n prod"
-                        error "Deployment failed due to health check failure. Rollback completed."
+                        error "Deployment failed due to health check failure. Rollback completed safely."
                     }
                 }
             }
         }
+    }
 
     post {
         always {
-            cleanWs() // Workspace clean karne ke liye
+            cleanWs()
+            echo 'Workspace cleaned successfully.'
         }
         success {
-            echo 'Pipeline successfully completed!'
+            echo 'Pipeline executed successfully! All stages passed.'
         }
         failure {
             echo 'Pipeline failed. Please check the logs.'
