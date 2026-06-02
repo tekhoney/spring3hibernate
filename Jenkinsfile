@@ -22,21 +22,22 @@ pipeline {
             }
         }
 
-       // --- STAGE 2: DOCKER BUILD & PUSH ---
+        // --- STAGE 2: DOCKER BUILD & PUSH ---
         stage('Docker Build & Push') {
             steps {
-                // withCredentials ka use karke hum bina ID ka jhanjhat paale login kar lenge
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh "docker login -u ${DOCKER_USER} -p ${DOCKER_PASS}"
-                    
-                    echo 'Building Docker Image...'
-                    sh "docker build -t ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ."
-                    
-                    echo 'Pushing Docker Image to Registry...'
-                    sh "docker push ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+                script {
+                    // Yahan aapki exact screenshot wali ID 'docker-hub-creds' use kar li hai
+                    docker.withRegistry('https://index.docker.io/v1/', 'docker-hub-creds') {
+                        echo 'Building Docker Image...'
+                        sh "docker build -t ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} ."
+                        
+                        echo 'Pushing Docker Image to Registry...'
+                        sh "docker push ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+                    }
                 }
             }
         }
+
         // --- STAGE 3: DEPLOY TO DEV ---
         stage('Deploy to Dev') {
             steps {
