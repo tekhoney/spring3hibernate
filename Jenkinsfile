@@ -84,11 +84,18 @@ pipeline {
                         kubectl ${kubeConfig} rollout status deployment/spring-app-${targetColor} -n prod
                     """
 
-                    // 3. Health Check
-                    def targetSvcUrl = "http://spring-app-${targetColor}.prod.svc.cluster.local:8080/spring3hibernate" 
-                    echo "Running Health Check on: ${targetSvcUrl}"
-                    
+                    // 3. Health Check via Pod IP (Bypassing Internal Cluster DNS)
                     try {
+                        echo "Fetching Target Pod IP for Health Check..."
+                        def podIp = sh(script: "kubectl ${kubeConfig} get pods -l color=${targetColor} -n prod -o jsonpath='{.items[0].status.podIP}'", returnStdout: true).trim()
+                        
+                        if (!podIp) {
+                            error "Could not fetch Pod IP for health check."
+                        }
+
+                        def targetSvcUrl = "http://${podIp}:8080/spring3hibernate" 
+                        echo "Running Health Check on: ${targetSvcUrl}"
+                        
                         def response = httpRequest url: targetSvcUrl, validResponseCodes: '200'
                         echo "Health Check Passed!"
                         
@@ -106,18 +113,3 @@ pipeline {
                 }
             }
         }
-    }
-
-    post {
-        always {
-            cleanWs()
-            echo 'Workspace cleaned successfully.'
-        }
-        success {
-            echo 'Pipeline executed successfully! All stages passed.'
-        }
-        failure {
-            echo 'Pipeline failed. Please check the logs.'
-        }
-    }
-}
