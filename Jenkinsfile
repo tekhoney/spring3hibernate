@@ -83,30 +83,27 @@ pipeline {
                         kubectl ${kubeConfig} rollout status deployment/spring-app-${targetColor} -n prod
                     """
 
-                    // 3. Health Check via Pod IP (Bypassing Internal Cluster DNS)
+                    // 3. Health Check via Internal Curl (Bypassing Network Isolation)
                     try {
-                        echo "Fetching Target Pod IP for Health Check..."
-                        def podIp = sh(script: "kubectl ${kubeConfig} get pods -l color=${targetColor} -n prod -o jsonpath='{.items[0].status.podIP}'", returnStdout: true).trim()
+                        echo "Running Health Check inside the cluster via curl..."
                         
-                        if (!podIp || podIp == "null") {
-                            echo "Color label not found, trying fallback app label..."
-                            podIp = sh(script: "kubectl ${kubeConfig} get pods -l app=spring-app-${targetColor} -n prod -o jsonpath='{.items[0].status.podIP}'", returnStdout: true).trim()
+                        // Hum naye pod ke andar hi curl command chalakar status code check karenge
+                        // Agar status code 200 aaya toh pass, nahi toh fail
+                        def checkCommand = "kubectl ${kubeConfig} exec -n prod deployment/spring-app-${targetColor} -- curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/spring3hibernate"
+                        
+                        def statusCode = sh(script: checkCommand, returnStdout: true).trim()
+                        echo "Health Check Response Code: ${statusCode}"
+                        
+                        if (statusCode == "200") {
+                            echo "Health Check Passed!"
+                            
+                            // 4. Traffic Switch
+                            echo "Switching live traffic to ${targetColor}..."
+                            sh "kubectl ${kubeConfig} patch svc spring-app-prod -n prod -p '{\"spec\":{\"selector\":{\"color\":\"${targetColor}\"}}}'"
+                            echo "Traffic successfully switched!"
+                        } else {
+                            error "Application responded with status code: ${statusCode}"
                         }
-
-                        if (!podIp || podIp == "null") {
-                            error "Could not fetch Pod IP for health check."
-                        }
-
-                        def targetSvcUrl = "http://${podIp}:8080/spring3hibernate" 
-                        echo "Running Health Check on: ${targetSvcUrl}"
-                        
-                        def response = httpRequest url: targetSvcUrl, validResponseCodes: '200'
-                        echo "Health Check Passed!"
-                        
-                        // 4. Traffic Switch
-                        echo "Switching live traffic to ${targetColor}..."
-                        sh "kubectl ${kubeConfig} patch svc spring-app-prod -n prod -p '{\"spec\":{\"selector\":{\"color\":\"${targetColor}\"}}}'"
-                        echo "Traffic successfully switched!"
                         
                     } catch (Exception e) {
                         echo "Health Check Failed! Triggering Automatic Rollback..."
